@@ -56,28 +56,40 @@ def create_message(board_name, message_title, message):
 # Function to hanle incoming requests
 def handle_request(request):
     # If the request dictionary does not include a dictionary
-    if "command" not in request: return (False, None)
+    if "command" not in request:
+        return (False, None)
     response = ""
     # GET_BOARDS request
     if request["command"] == "GET_BOARDS":
-        response = json.dumps(get_boards())
+        response = json.dumps({"success": True, "boards": get_boards()})
     # GET_MESSAGES request
     elif request["command"] == "GET_MESSAGES":
         # Check all the required field is supplied
-        if "board_name" not in request: return (False, None)
+        if "board_name" not in request:
+            return (False, None)
+        # Check the board exists
+        if request["board_name"] not in get_boards():
+            return (False, json.dumps({"success": False, "message": "Invalid board name."}))
         messages = get_messages(request["board_name"])[-100:]
-        response = json.dumps(messages)
+        response = json.dumps({"success": True, "messages": messages})
     # POST_MESSAGE request
     elif request["command"] == "POST_MESSAGE":
         # Check all the required fields are supplied
-        if not ("board_name" in request and "message_title" in request and "message" in request): return (False, None)
+        if not ("board_name" in request and "message_title" in request and "message" in request):
+            return (False, None)
+        # Check the board exists
+        if request["board_name"] not in get_boards():
+            return (False, json.dumps({"success": False, "message": "Invalid board name."}))
         create_message(request["board_name"], request["message_title"], request["message"])
-        response = "[]"
+        response = json.dumps({"success": True})
     else: return (False, None)
     return (True, response)
 
 # If the module is not being imported
 if __name__ == "__main__":
+    if len(get_boards()) == 0:
+        print("Error: No message boards defined, exiting...")
+        exit()
     try:
         # If the board directory does not exist, create it
         if not os.path.exists(BOARD_DIR):
@@ -87,21 +99,30 @@ if __name__ == "__main__":
         print("Listening on %s:%d" % source)
         sock = socket.socket()
         sock.bind(source)
-        sock.listen(5)
+        # Allow a queue of 10 incoming clients
+        sock.listen(10)
 
         # Infinite loop to handle each request (and connection)
         while True:
-            # Accept an incoming TCP connection
-            connection, address = sock.accept()
-            print("Received connection from %s%d." % address)
             try:
-                request = json.loads(connection.recv(1024).decode("utf-8"))
+                # Accept an incoming TCP connection
+                connection, address = sock.accept()
+                # Decode the received decoded JSON request 
+                request = json.loads(connection.recv(65536).decode("utf-8"))
+                # Handle the request
                 success, response = handle_request(request)
-                if success: connection.send(response.encode("utf-8"))
+                # If a response is defined, send it back, else send back an error
+                connection.send(response.encode("utf-8") if response != None else json.dumps({"success": False, "message": "Invalid command or syntax."}).encode("utf-8"))
+                # Log the request
                 log(address, request["command"], success)
             except ValueError as e:
                 # A ValueError occurs when an empty string is provided to the JSON deserialiser
                 print("Error while decoding message:", e)
+                log(address, "UNKNOWN", False)
+            except OSError as e:
+                # An OSError occurs when the socket encounters an exception
+                print("A socket error occurred:", e)
+                log(address, "UNKNOWN", False)
             finally:
                 # Close the connection
                 connection.close()

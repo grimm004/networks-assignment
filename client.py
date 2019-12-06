@@ -23,7 +23,7 @@ def send_command(sock, command, **kwargs):
 def await_response(sock):
     try:
         # Decode the received data and try deserialise and return it
-        return json.loads(sock.recv(1024).decode("utf-8"))
+        return json.loads(sock.recv(65536).decode("utf-8"))
     except ValueError:
         # A value error means the JSON decoder encountered a corrupt or empty string
         return None
@@ -32,6 +32,7 @@ def await_response(sock):
 def run_command(command, **kwargs):
     # Open a TCP socket
     with socket.socket() as sock:
+        sock.settimeout(10)
         # Connect to the supplied host and port
         sock.connect(endpoint)
         # Send the supplied command
@@ -58,7 +59,11 @@ def post_message(board_name, message_title, message):
 if __name__ == "__main__":
     try:
         # Fetch the list of available boards
-        boards = get_boards()
+        response = get_boards()
+        if not response["success"]:
+            print("Error: No message boards, exiting...")
+            exit()
+        boards = response["boards"]
         # If there is an error collecting the boards output an error and exit
         if boards is None:
             print("Error fetching boards.")
@@ -77,18 +82,21 @@ if __name__ == "__main__":
                 # Check its within the range of board numbers
                 if 0 < selected <= len(boards):
                     # Get the messages for the corresponding board
-                    messages = get_messages(boards[selected - 1])
-                    # If the messages could not be retrieved print an error
-                    if messages is None:
-                        print("Error fetching messages.")
-                        continue
-                    # If there are no messages, output a warning
-                    if len(messages) == 0:
-                        print("No messages in %s." % boards[selected - 1])
+                    response = get_messages(boards[selected - 1])
+                    if response["success"]:
+                        # If the messages could not be retrieved print an error
+                        if response["messages"] is None:
+                            print("Error fetching messages.")
+                            continue
+                        # If there are no messages, output a warning
+                        if len(response["messages"]) == 0:
+                            print("No messages in %s." % boards[selected - 1])
+                        else:
+                            # If there are messages, output them
+                            print("Messages in %s:" % boards[selected - 1])
+                            print("\n".join("%s: %s" % (message["message_title"], message["message"]) for message in response["messages"]))
                     else:
-                        # If there are messages, output them
-                        print("Messages in %s:" % boards[selected - 1])
-                        print("\n".join("%s: %s" % (message["message_title"], message["message"]) for message in messages))
+                        print("Error: %s" % response["message"])
                 else:
                     print("Invalid board selection.")
                     continue
@@ -101,11 +109,12 @@ if __name__ == "__main__":
                     selected = int(request)
                     if 0 < selected <= len(boards):
                         # If all is valid, fetch message title and message input and post it to the server
-                        if post_message(boards[selected - 1], input("Enter message title:\n> "), input("Eneter message:\n> ")) is None:
-                            print("Error posting message.")
-                            continue
-                        else:
+                        response = post_message(boards[selected - 1], input("Enter message title:\n> "), input("Eneter message:\n> "))
+                        if response["success"]:
                             print("Message posted.")
+                        else:
+                            print("Error posting message: %s" % response["message"])
+                            continue
                     else:
                         print("Invalid board selection.")
                         continue

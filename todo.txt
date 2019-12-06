@@ -1,2 +1,0 @@
-Add error detection and better data validation
-Check all requirements are met
